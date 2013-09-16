@@ -265,7 +265,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode {
     Runnable mPostCollapseCleanup = null;
 
     // status bar brightness control
-    private boolean mBrightnessControl = true;
+    private boolean mBrightnessControl;
     private float mScreenWidth;
     private int mMinBrightness;
     int mLinger;
@@ -709,8 +709,6 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode {
 
         // listen for USER_SETUP_COMPLETE setting (per-user)
         resetUserSetupObserver();
-
-        mVelocityTracker = VelocityTracker.obtain();
 
         return mStatusBarView;
     }
@@ -1863,47 +1861,46 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode {
         }
     }
 
-    private void brightnessControl(MotionEvent event)
-    {
-        if (mBrightnessControl)
-        {
-            final int action = event.getAction();
-            final int x = (int)event.getRawX();
-            final int y = (int)event.getRawY();
-            if (action == MotionEvent.ACTION_DOWN) {
-                mLinger = 0;
-                mInitialTouchX = x;
-                mInitialTouchY = y;
-                mHandler.removeCallbacks(mLongPressBrightnessChange);
-                if ((y) < mNotificationHeaderHeight) {
-                    mHandler.postDelayed(mLongPressBrightnessChange,
-                            BRIGHTNESS_CONTROL_LONG_PRESS_TIMEOUT);
+    private void brightnessControl(MotionEvent event) {
+        final int action = event.getAction();
+        final int x = (int) event.getRawX();
+        final int y = (int) event.getRawY();
+        if (action == MotionEvent.ACTION_DOWN) {
+            mLinger = 0;
+            mInitialTouchX = x;
+            mInitialTouchY = y;
+            mVelocityTracker = VelocityTracker.obtain();
+            mHandler.removeCallbacks(mLongPressBrightnessChange);
+            if ((y) < mNotificationHeaderHeight) {
+                mHandler.postDelayed(mLongPressBrightnessChange,
+                        BRIGHTNESS_CONTROL_LONG_PRESS_TIMEOUT);
+            }
+        } else if (action == MotionEvent.ACTION_MOVE) {
+            if ((y) < mNotificationHeaderHeight) {
+                mVelocityTracker.computeCurrentVelocity(1000);
+                float yVel = mVelocityTracker.getYVelocity();
+                yVel = Math.abs(yVel);
+                if (yVel < 50.0f) {
+                    if (mLinger > BRIGHTNESS_CONTROL_LINGER_THRESHOLD) {
+                        adjustBrightness(x);
+                    } else {
+                        mLinger++;
+                    }
                 }
-            } else if (action == MotionEvent.ACTION_MOVE) {
-                if ((y) < mNotificationHeaderHeight) {
-                    mVelocityTracker.computeCurrentVelocity(1000);
-                    float yVel = mVelocityTracker.getYVelocity();
-                    yVel = Math.abs(yVel);
-                    if (yVel < 50.0f) {
-                        if (mLinger > BRIGHTNESS_CONTROL_LINGER_THRESHOLD) {
-                            adjustBrightness(x);
-                        } else {
-                            mLinger++;
-                        }
-                    }
-                    int touchSlop = ViewConfiguration.get(mContext).getScaledTouchSlop();
-                    if (Math.abs(x - mInitialTouchX) > touchSlop ||
-                            Math.abs(y - mInitialTouchY) > touchSlop) {
-                        mHandler.removeCallbacks(mLongPressBrightnessChange);
-                    }
-                } else {
+                int touchSlop = ViewConfiguration.get(mContext).getScaledTouchSlop();
+                if (Math.abs(x - mInitialTouchX) > touchSlop ||
+                        Math.abs(y - mInitialTouchY) > touchSlop) {
                     mHandler.removeCallbacks(mLongPressBrightnessChange);
                 }
-            } else if (action == MotionEvent.ACTION_UP
-                    || action == MotionEvent.ACTION_CANCEL) {
+            } else {
                 mHandler.removeCallbacks(mLongPressBrightnessChange);
-                mLinger = 0;
             }
+        } else if (action == MotionEvent.ACTION_UP
+                || action == MotionEvent.ACTION_CANCEL) {
+            mVelocityTracker.recycle();
+            mVelocityTracker = null;
+            mHandler.removeCallbacks(mLongPressBrightnessChange);
+            mLinger = 0;
         }
     }
 
@@ -1932,8 +1929,6 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode {
             mGestureRec.add(event);
         }
 
-        brightnessControl(event);
-
         if (mStatusBarWindowState == WINDOW_STATE_SHOWING) {
             final boolean upOrCancel =
                     event.getAction() == MotionEvent.ACTION_UP ||
@@ -1944,6 +1939,14 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode {
                 setInteracting(StatusBarManager.WINDOW_STATUS_BAR, true);
             }
         }
+
+        if (mBrightnessControl) {
+            brightnessControl(event);
+            if ((mDisabled & StatusBarManager.DISABLE_EXPAND) != 0) {
+                return true;
+            }
+        }
+
         return false;
     }
 
