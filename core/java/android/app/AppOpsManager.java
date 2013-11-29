@@ -369,8 +369,8 @@ public class AppOpsManager {
             android.Manifest.permission.WRITE_CALL_LOG,
             android.Manifest.permission.READ_CALENDAR,
             android.Manifest.permission.WRITE_CALENDAR,
-            null, // no permission required for notifications
             android.Manifest.permission.ACCESS_WIFI_STATE,
+            null, // no permission required for notifications
             null, // neighboring cells shares the coarse location perm
             android.Manifest.permission.CALL_PHONE,
             android.Manifest.permission.READ_SMS,
@@ -540,6 +540,25 @@ public class AppOpsManager {
         }
     }
 
+    private static HashMap<String, Integer> nameToOp = new HashMap<String, Integer>();
+    static {
+        for (int i = 0; i < _NUM_OP; i++) {
+            nameToOp.put(sOpNames[i], sOpToSwitch[i]);
+        }
+    }
+
+    /**
+     * Retrieve the op switch for the given operation name.
+     * @hide
+     */
+    public static int nameToSwitch(String name) {
+        int ret = OP_NONE;
+        if (nameToOp.containsKey(name)) {
+            ret = nameToOp.get(name);
+        }
+        return ret;
+    }
+
     /**
      * Retrieve the op switch that controls the given operation.
      * @hide
@@ -654,13 +673,15 @@ public class AppOpsManager {
         private final long mTime;
         private final long mRejectTime;
         private final int mDuration;
+        private final boolean mLocked;
 
-        public OpEntry(int op, int mode, long time, long rejectTime, int duration) {
+        public OpEntry(int op, int mode, long time, long rejectTime, int duration, boolean locked) {
             mOp = op;
             mMode = mode;
             mTime = time;
             mRejectTime = rejectTime;
             mDuration = duration;
+            mLocked = locked;
         }
 
         public int getOp() {
@@ -687,6 +708,10 @@ public class AppOpsManager {
             return mDuration == -1 ? (int)(System.currentTimeMillis()-mTime) : mDuration;
         }
 
+        public boolean getLocked() {
+            return mLocked;
+        }
+
         @Override
         public int describeContents() {
             return 0;
@@ -699,6 +724,7 @@ public class AppOpsManager {
             dest.writeLong(mTime);
             dest.writeLong(mRejectTime);
             dest.writeInt(mDuration);
+            dest.writeInt(mLocked ? 1 : 0);
         }
 
         OpEntry(Parcel source) {
@@ -707,6 +733,7 @@ public class AppOpsManager {
             mTime = source.readLong();
             mRejectTime = source.readLong();
             mDuration = source.readInt();
+            mLocked = (source.readInt() == 1) ? true : false;
         }
 
         public static final Creator<OpEntry> CREATOR = new Creator<OpEntry>() {

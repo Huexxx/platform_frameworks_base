@@ -35,8 +35,11 @@ import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.AsyncTask;
 import android.os.Binder;
+import android.os.Environment;
+import android.os.FileObserver;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Message;
 import android.os.Process;
 import android.os.RemoteException;
 import android.os.ServiceManager;
@@ -89,6 +92,59 @@ public class AppOpsService extends IAppOpsService.Stub {
     final SparseArray<HashMap<String, Ops>> mUidOps
             = new SparseArray<HashMap<String, Ops>>();
 
+    // Enterprise Ops (eops) policy structure.
+    final HashMap<String, SparseArray<Op>> mLockedPolicy
+        = new HashMap<String, SparseArray<Op>>();
+
+    // packageName -> seinfo cache. Helpful with mLockedPolicy lookups.
+    final HashMap<String, String> mEopsCache
+        = new HashMap<String, String>();
+
+    static final File[] EOPS_POLICY_FILE = {
+        new File(Environment.getDataDirectory(), "security/eops.xml"),
+        new File(Environment.getRootDirectory(), "etc/security/eops.xml")
+    };
+
+    private final EopPolicyObserver mObserver;
+
+    private class EopPolicyObserver extends FileObserver {
+        private final String mEopMonitoredFile;
+
+        private static final int MONITOR_FLAGS = FileObserver.CREATE|FileObserver.MOVED_TO|
+            FileObserver.CLOSE_WRITE|FileObserver.DELETE|FileObserver.MOVED_FROM;
+
+        public EopPolicyObserver(File monitoredFile) {
+            super(monitoredFile.getParentFile().getAbsolutePath(), MONITOR_FLAGS);
+            mEopMonitoredFile = monitoredFile.getName();
+        }
+
+        @Override
+        public void onEvent(int event, String path) {
+            if (path.equals(mEopMonitoredFile)) {
+                if ((event & MONITOR_FLAGS) != 0) {
+                    mEopHandler.removeMessages(READ_RULES);
+                    // Wait to post (~250) in case there are back-to-back events.
+                    mEopHandler.sendEmptyMessageDelayed(READ_RULES, 250);
+                }
+            }
+        }
+    }
+
+    private static final int READ_RULES = 0;
+    final Handler mEopHandler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+            case READ_RULES:
+                if (DEBUG) {
+                    Slog.d(TAG, "Event triggered to reload eops policy.");
+                }
+                readEnterprisePolicy();
+                break;
+            }
+        };
+    };
+
     public final static class Ops extends SparseArray<Op> {
         public final String packageName;
         public final int uid;
@@ -100,20 +156,26 @@ public class AppOpsService extends IAppOpsService.Stub {
     }
 
     public final static class Op {
-        public final int uid;
-        public final String packageName;
+        public int uid;
+        public String packageName;
         public final int op;
         public int mode;
         public int duration;
         public long time;
         public long rejectTime;
         public int nesting;
+        public boolean locked;
 
         public Op(int _uid, String _packageName, int _op) {
+            this(_uid, _packageName, _op, false);
+        }
+
+        public Op(int _uid, String _packageName, int _op, boolean _locked) {
             uid = _uid;
             packageName = _packageName;
             op = _op;
             mode = AppOpsManager.opToDefaultMode(op);
+            locked = _locked;
         }
     }
 
@@ -186,10 +248,27 @@ public class AppOpsService extends IAppOpsService.Stub {
         }
     }
 
+    private void readEnterprisePolicy() {
+        for (int i = 0; i < EOPS_POLICY_FILE.length; i++) {
+            File policy = EOPS_POLICY_FILE[i];
+            if (policy.canRead()) {
+                Slog.d(TAG, "Using eops policy " + policy.getPath());
+                readState(new AtomicFile(policy), true);
+                break;
+            }
+            Slog.d(TAG, "Ignoring eops policy " + policy.getPath());
+        }
+    }
+
     public AppOpsService(File storagePath) {
         mFile = new AtomicFile(storagePath);
         mHandler = new Handler();
-        readState();
+        readState(mFile, false);
+        readEnterprisePolicy();
+
+        // Listen for changes to the eops policy on data partition.
+        mObserver = new EopPolicyObserver(EOPS_POLICY_FILE[0]);
+        mObserver.startWatching();
     }
 
     public void publish(Context context) {
@@ -240,6 +319,8 @@ public class AppOpsService extends IAppOpsService.Stub {
                     scheduleWriteLocked();
                 }
             }
+            // Remove the Eops cache entry too.
+            mEopsCache.remove(packageName);
         }
     }
 
@@ -273,7 +354,7 @@ public class AppOpsService extends IAppOpsService.Stub {
             for (int j=0; j<pkgOps.size(); j++) {
                 Op curOp = pkgOps.valueAt(j);
                 resOps.add(new AppOpsManager.OpEntry(curOp.op, curOp.mode, curOp.time,
-                        curOp.rejectTime, curOp.duration));
+                        curOp.rejectTime, curOp.duration, curOp.locked));
             }
         } else {
             for (int j=0; j<ops.length; j++) {
@@ -283,7 +364,7 @@ public class AppOpsService extends IAppOpsService.Stub {
                         resOps = new ArrayList<AppOpsManager.OpEntry>();
                     }
                     resOps.add(new AppOpsManager.OpEntry(curOp.op, curOp.mode, curOp.time,
-                            curOp.rejectTime, curOp.duration));
+                            curOp.rejectTime, curOp.duration, curOp.locked));
                 }
             }
         }
@@ -299,6 +380,7 @@ public class AppOpsService extends IAppOpsService.Stub {
             for (int i=0; i<mUidOps.size(); i++) {
                 HashMap<String, Ops> packages = mUidOps.valueAt(i);
                 for (Ops pkgOps : packages.values()) {
+                    pkgOps = (unionPolicies(pkgOps.uid, pkgOps.packageName)).get(pkgOps.packageName);
                     ArrayList<AppOpsManager.OpEntry> resOps = collectOps(pkgOps, ops);
                     if (resOps != null) {
                         if (res == null) {
@@ -363,7 +445,7 @@ public class AppOpsService extends IAppOpsService.Stub {
         synchronized (this) {
             Op op = getOpLocked(code, uid, packageName, true);
             if (op != null) {
-                if (op.mode != mode) {
+                if (op.mode != mode && !op.locked) {
                     op.mode = mode;
                     ArrayList<Callback> cbs = mOpModeWatchers.get(code);
                     if (cbs != null) {
@@ -436,7 +518,8 @@ public class AppOpsService extends IAppOpsService.Stub {
                     for (int j=pkgOps.size()-1; j>=0; j--) {
                         Op curOp = pkgOps.valueAt(j);
                         if (AppOpsManager.opAllowsReset(curOp.op)
-                                && curOp.mode != AppOpsManager.opToDefaultMode(curOp.op)) {
+                            && curOp.mode != AppOpsManager.opToDefaultMode(curOp.op)
+                            && !curOp.locked) {
                             curOp.mode = AppOpsManager.opToDefaultMode(curOp.op);
                             changed = true;
                             callbacks = addCallbacks(callbacks, packageName, curOp.op,
@@ -546,6 +629,7 @@ public class AppOpsService extends IAppOpsService.Stub {
         synchronized (this) {
             Op op = getOpLocked(AppOpsManager.opToSwitch(code), uid, packageName, false);
             if (op == null) {
+				// Bob, could add
                 return AppOpsManager.opToDefaultMode(code);
             }
             return op.mode;
@@ -686,8 +770,64 @@ public class AppOpsService extends IAppOpsService.Stub {
         throw new IllegalArgumentException("Bad operation #" + op);
     }
 
-    private Ops getOpsLocked(int uid, String packageName, boolean edit) {
+
+    // Overlay enterprise policy on user policy where appropriate
+    private HashMap<String, Ops> unionPolicies(int uid, String packageName) {
         HashMap<String, Ops> pkgOps = mUidOps.get(uid);
+        // No eops policy at all then just return user policy.
+        if (mLockedPolicy.isEmpty()) {
+            return pkgOps;
+        }
+
+        // Check eops policy for the seinfo tag of the packageName.
+        SparseArray<Op> lockedOps = null;
+        if (!mEopsCache.containsKey(packageName)) {
+            long callingId = Binder.clearCallingIdentity();
+            try {
+                PackageManager pm = mContext.getPackageManager();
+                final String se = (pm.getApplicationInfo(packageName, 0)).seinfo;
+                lockedOps = mLockedPolicy.get(se);
+                // Load the cache.
+                mEopsCache.put(packageName, se);
+            } catch (NameNotFoundException e) {
+            } finally {
+                Binder.restoreCallingIdentity(callingId);
+            }
+        } else {
+            lockedOps = mLockedPolicy.get(mEopsCache.get(packageName));
+        }
+
+        // No eops policy b/c of NNFE or missing seinfo. Return user policy.
+        if (lockedOps == null) {
+            return pkgOps;
+        }
+
+        // We have eops policy for some op(s) for this uid.
+        if (pkgOps == null) {
+            pkgOps = new HashMap<String, Ops>(1);
+            mUidOps.put(uid, pkgOps);
+        }
+
+        Ops ops = pkgOps.get(packageName);
+        if (ops == null) {
+            ops = new Ops(packageName, uid);
+            pkgOps.put(packageName, ops);
+        }
+
+        // Override user policy with eops.
+        for (int i = 0; i < lockedOps.size(); i++) {
+            Op o = lockedOps.valueAt(i);
+            o.uid = uid;
+            o.packageName = packageName;
+            ops.put(o.op, o);
+        }
+
+        return pkgOps;
+    }
+
+
+    private Ops getOpsLocked(int uid, String packageName, boolean edit) {
+        HashMap<String, Ops> pkgOps = unionPolicies(uid, packageName);;
         if (pkgOps == null) {
             if (!edit) {
                 return null;
@@ -774,17 +914,42 @@ public class AppOpsService extends IAppOpsService.Stub {
         return op;
     }
 
-    void readState() {
+    void readState(AtomicFile file, boolean epolicy) {
         synchronized (mFile) {
             synchronized (this) {
                 FileInputStream stream;
                 try {
-                    stream = mFile.openRead();
+                    stream = file.openRead();
                 } catch (FileNotFoundException e) {
-                    Slog.i(TAG, "No existing app ops " + mFile.getBaseFile() + "; starting empty");
+                    Slog.i(TAG, "No existing app ops " + file.getBaseFile() + "; starting empty");
                     return;
                 }
                 boolean success = false;
+                if (epolicy) {
+                    // Parsing an eops policy, clear out the old policy.
+                    // Also, remove any user policy that might have the
+                    // locked field set. This is a concern when run-time
+                    // reloads occur. We do this here because we already
+                    // have the lock held and any delay is probably ok.
+                    // First boot will never expierence this loop.
+                    mLockedPolicy.clear();
+                    for (int i=mUidOps.size()-1; i>=0; i--) {
+                        HashMap<String, Ops> packages = mUidOps.valueAt(i);
+                        Iterator<Map.Entry<String, Ops>> it = packages.entrySet().iterator();
+                        while (it.hasNext()) {
+                            Map.Entry<String, Ops> ent = it.next();
+                            Ops pkgOps = ent.getValue();
+                            for (int j=pkgOps.size()-1; j>=0; j--) {
+                                Op curOp = pkgOps.valueAt(j);
+                                if (curOp.locked) {
+                                    pkgOps.removeAt(j);
+                                }
+                            }
+
+                        }
+                    }
+
+                }
                 try {
                     XmlPullParser parser = Xml.newPullParser();
                     parser.setInput(stream, null);
@@ -808,6 +973,8 @@ public class AppOpsService extends IAppOpsService.Stub {
                         String tagName = parser.getName();
                         if (tagName.equals("pkg")) {
                             readPackage(parser);
+                        } else if (tagName.equals("seinfo")) {
+                            readSeinfo(parser);
                         } else {
                             Slog.w(TAG, "Unknown element under <app-ops>: "
                                     + parser.getName());
@@ -828,7 +995,7 @@ public class AppOpsService extends IAppOpsService.Stub {
                 } catch (IndexOutOfBoundsException e) {
                     Slog.w(TAG, "Failed parsing " + e);
                 } finally {
-                    if (!success) {
+                    if (!success && !epolicy) {
                         mUidOps.clear();
                     }
                     try {
@@ -837,6 +1004,44 @@ public class AppOpsService extends IAppOpsService.Stub {
                     }
                 }
             }
+        }
+    }
+
+    void readSeinfo(XmlPullParser parser) throws XmlPullParserException, IOException {
+        String seinfo = parser.getAttributeValue(null, "name");
+        int outerDepth = parser.getDepth();
+        int type;
+        while ((type = parser.next()) != XmlPullParser.END_DOCUMENT
+               && (type != XmlPullParser.END_TAG || parser.getDepth() > outerDepth)) {
+            if (type == XmlPullParser.END_TAG || type == XmlPullParser.TEXT) {
+                continue;
+            }
+
+            String tagName = parser.getName();
+            if (tagName.equals("op")) {
+                readOp(parser, seinfo);
+            } else {
+                Slog.w(TAG, "Unknown element under <seinfo>: "
+                       + parser.getName());
+                XmlUtils.skipCurrentTag(parser);
+            }
+        }
+    }
+
+    void readOp(XmlPullParser parser, String seinfo) {
+        String op = parser.getAttributeValue(null, "name");
+        int opInt = AppOpsManager.nameToSwitch(op);
+        if (seinfo != null && opInt != AppOpsManager.OP_NONE) {
+            SparseArray<Op> eops = mLockedPolicy.get(seinfo);
+            if (eops == null) {
+                eops = new SparseArray<Op>();
+                mLockedPolicy.put(seinfo, eops);
+            }
+            // true means locked operation.
+            Op eop = new Op(-1, "", opInt, true);
+            // For now everything is ignored.
+            eop.mode = AppOpsManager.MODE_IGNORED;
+            eops.put(opInt, eop);
         }
     }
 
@@ -946,6 +1151,9 @@ public class AppOpsService extends IAppOpsService.Stub {
                         List<AppOpsManager.OpEntry> ops = pkg.getOps();
                         for (int j=0; j<ops.size(); j++) {
                             AppOpsManager.OpEntry op = ops.get(j);
+                            if (op.getLocked()) {
+                                continue;
+                            }
                             out.startTag(null, "op");
                             out.attribute(null, "n", Integer.toString(op.getOp()));
                             if (op.getMode() != AppOpsManager.opToDefaultMode(op.getOp())) {

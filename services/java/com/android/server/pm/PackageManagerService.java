@@ -180,6 +180,8 @@ public class PackageManagerService extends IPackageManager.Stub {
     static final boolean DEBUG_SETTINGS = false;
     static final boolean DEBUG_PREFERRED = false;
     static final boolean DEBUG_UPGRADE = false;
+    private static final boolean DEBUG_POLICY = true;
+    private static final boolean DEBUG_POLICY_INSTALL = DEBUG_POLICY || false;
     private static final boolean DEBUG_INSTALL = false;
     private static final boolean DEBUG_REMOVE = false;
     private static final boolean DEBUG_BROADCASTS = false;
@@ -3966,7 +3968,7 @@ public class PackageManagerService extends IPackageManager.Stub {
         for (int user : users) {
             if (user != 0) {
                 res = mInstaller.createUserData(packageName,
-                        UserHandle.getUid(user, uid), user);
+                        UserHandle.getUid(user, uid), user, seinfo);
                 if (res < 0) {
                     return res;
                 }
@@ -4311,9 +4313,13 @@ public class PackageManagerService extends IPackageManager.Stub {
                 pkg.applicationInfo.flags |= ApplicationInfo.FLAG_UPDATED_SYSTEM_APP;
             }
 
-            if (mFoundPolicyFile) {
-                SELinuxMMAC.assignSeinfoValue(pkg);
-            }
+            if (mFoundPolicyFile && !SELinuxMMAC.passInstallPolicyChecks(pkg) &&
+                SELinuxMMAC.getEnforcingMode()) {
+                Slog.w(TAG, "Installing application package " + pkg.packageName
+                       + " failed due to policy.");
+                mLastScanError = PackageManager.INSTALL_FAILED_POLICY_REJECTED_PERMISSION;
+                return null;
+             }
 
             pkg.applicationInfo.uid = pkgSetting.appId;
             pkg.mExtras = pkgSetting;
@@ -5846,6 +5852,7 @@ public class PackageManagerService extends IPackageManager.Stub {
         }
 
         public final void addService(PackageParser.Service s) {
+            final boolean systemApp = isSystemApp(s.info.applicationInfo);
             mServices.put(s.getComponentName(), s);
             if (DEBUG_SHOW_INFO) {
                 Log.v(TAG, "  "
@@ -5857,6 +5864,11 @@ public class PackageManagerService extends IPackageManager.Stub {
             int j;
             for (j=0; j<NI; j++) {
                 PackageParser.ServiceIntentInfo intent = s.intents.get(j);
+                if (!systemApp && intent.getPriority() > 0) {
+                    intent.setPriority(0);
+                    Log.w(TAG, "Package " + s.info.applicationInfo.packageName + " has service "
+                          + s.className + " with priority > 0, forcing to 0");
+                }
                 if (DEBUG_SHOW_INFO) {
                     Log.v(TAG, "    IntentFilter:");
                     intent.dump(new LogPrinter(Log.VERBOSE, TAG), "      ");
@@ -6201,6 +6213,10 @@ public class PackageManagerService extends IPackageManager.Stub {
             if (v1 != v2) {
                 return (v1 > v2) ? -1 : 1;
             }
+            if (r1.system != r2.system) {
+                return r1.system ? -1 : 1;
+            }
+
             v1 = r1.preferredOrder;
             v2 = r2.preferredOrder;
             if (v1 != v2) {
@@ -6214,9 +6230,6 @@ public class PackageManagerService extends IPackageManager.Stub {
             //System.out.println("Comparing: m1=" + m1 + " m2=" + m2);
             if (v1 != v2) {
                 return (v1 > v2) ? -1 : 1;
-            }
-            if (r1.system != r2.system) {
-                return r1.system ? -1 : 1;
             }
             return 0;
         }
