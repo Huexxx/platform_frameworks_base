@@ -4,4 +4,8 @@
 
     <!-- Content description of the data connection type HSPA+ for accessibility (not shown on the screen). [CHAR LIMIT=NONE] -->
     <string name="accessibility_data_connection_HP">HSPA+</string>
+
+    <!-- Quick Settings -->
+    <!-- Power Menu tile -->
+    <string name="quick_settings_power_menu_label">Power Menu</string>
 </resources>
