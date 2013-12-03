@@ -277,7 +277,8 @@ public class CircleBattery extends ImageView implements BatteryController.Batter
         mPaintFont.getTextBounds("99", 0, "99".length(), bounds);
         mTextX = mCircleSize / 2.0f + getPaddingLeft();
         // the +1 at end of formula balances out rounding issues. works out on all resolutions
-        mTextY = mCircleSize / 2.0f + (bounds.bottom - bounds.top) / 2.0f - strokeWidth / 2.0f + 1;
+        // Huexxx: try with +2 to get it better centered
+        mTextY = mCircleSize / 2.0f + (bounds.bottom - bounds.top) / 2.0f - strokeWidth / 2.0f + 2;
     }
 
     private int getColorForLevel(int percent) {
