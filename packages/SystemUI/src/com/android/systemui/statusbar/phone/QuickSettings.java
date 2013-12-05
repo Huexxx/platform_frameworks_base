@@ -327,6 +327,15 @@ class QuickSettings {
                 }
             }
         });
+        if (LONG_PRESS_TOGGLES) {
+            userTile.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    startSettingsActivity(android.provider.Settings.ACTION_SYNC_SETTINGS);
+                    return true;
+                }
+            });
+        }
         mModel.addUserTile(userTile, new QuickSettingsModel.RefreshCallback() {
             @Override
             public void refreshView(QuickSettingsTileView view, State state) {
@@ -353,6 +362,15 @@ class QuickSettings {
                 showBrightnessDialog();
             }
         });
+        if (LONG_PRESS_TOGGLES) {
+            brightnessTile.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    startSettingsActivity(android.provider.Settings.ACTION_DISPLAY_SETTINGS);
+                    return true;
+                }
+            });
+        }
         mModel.addBrightnessTile(brightnessTile,
                 new QuickSettingsModel.BasicRefreshCallback(brightnessTile));
         parent.addView(brightnessTile);
@@ -367,6 +385,15 @@ class QuickSettings {
                 startSettingsActivity(android.provider.Settings.ACTION_SETTINGS);
             }
         });
+        if (LONG_PRESS_TOGGLES) {
+            settingsTile.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    startSettingsActivity(android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS);
+                    return true;
+                }
+            });
+        }
         mModel.addSettingsTile(settingsTile,
                 new QuickSettingsModel.BasicRefreshCallback(settingsTile));
         parent.addView(settingsTile);
@@ -433,13 +460,21 @@ class QuickSettings {
             rssiTile.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    Intent intent = new Intent();
-                    intent.setComponent(new ComponentName(
-                            "com.android.settings",
-                            "com.android.settings.Settings$DataUsageSummaryActivity"));
-                    startSettingsActivity(intent);
+                    startSettingsActivity(android.provider.Settings.ACTION_DATA_ROAMING_SETTINGS);
                 }
             });
+            if (LONG_PRESS_TOGGLES) {
+                rssiTile.setOnLongClickListener(new View.OnLongClickListener() {
+                    @Override
+                    public boolean onLongClick(View v) {
+                        Intent intent = new Intent();
+                        intent.setComponent(new ComponentName(
+                                "com.android.settings",
+                                "com.android.settings.Settings$DataUsageSummaryActivity"));
+                        startSettingsActivity(intent);
+                        return true;
+                    }} );
+            }
             mModel.addRSSITile(rssiTile, new NetworkActivityCallback() {
                 @Override
                 public void refreshView(QuickSettingsTileView view, State state) {
@@ -536,6 +571,15 @@ class QuickSettings {
         // Airplane Mode
         final QuickSettingsBasicTile airplaneTile
                 = new QuickSettingsBasicTile(mContext);
+        if (LONG_PRESS_TOGGLES) {
+            airplaneTile.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override
+                public boolean onLongClick(View v) {
+                    startSettingsActivity(android.provider.Settings.ACTION_WIRELESS_SETTINGS);
+                    return true;
+                }
+            });
+        }
         mModel.addAirplaneModeTile(airplaneTile, new QuickSettingsModel.RefreshCallback() {
             @Override
             public void refreshView(QuickSettingsTileView unused, State state) {
