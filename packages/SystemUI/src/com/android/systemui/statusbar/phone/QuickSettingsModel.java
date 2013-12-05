@@ -276,6 +276,10 @@ class QuickSettingsModel implements BluetoothStateChangeCallback,
     private RefreshCallback mPowerMenuCallback;
     private State mPowerMenuState = new State();
 
+    private QuickSettingsTileView mTorchTile;
+    private RefreshCallback mTorchCallback;
+    private State mTorchState = new State();
+
     private RotationLockController mRotationLockController;
 
     public QuickSettingsModel(Context context) {
@@ -316,6 +320,7 @@ class QuickSettingsModel implements BluetoothStateChangeCallback,
         refreshRssiTile();
         refreshLocationTile();
         refreshPowerMenuTile();
+        refreshTorchTile();
     }
 
     // Settings
@@ -813,5 +818,32 @@ class QuickSettingsModel implements BluetoothStateChangeCallback,
         Resources r = mContext.getResources();
         mPowerMenuState.label = r.getString(R.string.quick_settings_power_menu_label);
         mPowerMenuCallback.refreshView(mPowerMenuTile, mPowerMenuState);
+    }
+
+    // Torch
+    // show torch tile only on device with flash
+    boolean hasTorchPackage() {
+        PackageManager pm = mContext.getPackageManager();
+        try {
+            return pm.getPackageInfo("net.cactii.flash2", 0) != null;
+        } catch (PackageManager.NameNotFoundException e) {
+            // ignored, just catched: return false below
+        }
+        return false;
+    }
+
+    void addTorchTile(QuickSettingsTileView view, RefreshCallback cb) {
+        mTorchTile = view;
+        mTorchCallback = cb;
+        refreshTorchTile();
+    }
+    void refreshTorchTile() {
+        if (hasTorchPackage()) {
+            Resources r = mContext.getResources();
+            mTorchState.label = r.getString(R.string.quick_settings_torch);
+            mTorchCallback.refreshView(mTorchTile, mTorchState);
+        } else {
+            return;
+        }
     }
 }

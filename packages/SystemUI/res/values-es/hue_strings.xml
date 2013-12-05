@@ -18,4 +18,8 @@
     <string name="navbar_menu_always_button">Botón Menú (siempre visible)</string>
     <string name="navbar_menu_big_button">Botón Menú</string>
 
+    <!-- Torch -->
+    <string name="quick_settings_torch">Linterna</string>
+    <string name="quick_settings_torch_off">Linterna</string>
+
 </resources>

@@ -62,6 +62,7 @@ import android.view.WindowManagerGlobal;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import com.android.internal.util.huexxx.TorchConstants;
 import com.android.systemui.R;
 import com.android.systemui.statusbar.phone.QuickSettingsModel.ActivityState;
 import com.android.systemui.statusbar.phone.QuickSettingsModel.BluetoothState;
@@ -678,7 +679,7 @@ class QuickSettings {
                 new QuickSettingsModel.BasicRefreshCallback(locationTile));
         parent.addView(locationTile);
 
-    // Power Menu
+        // Power Menu
         final QuickSettingsBasicTile powermenuTile = new QuickSettingsBasicTile(mContext);
         powermenuTile.setImageResource(R.drawable.ic_qs_power_menu);
         powermenuTile.setOnClickListener(new View.OnClickListener() {
@@ -699,9 +700,35 @@ class QuickSettings {
                     return true;
                 }
             });
-            mModel.addPowerMenuTile(powermenuTile,
-                    new QuickSettingsModel.BasicRefreshCallback(powermenuTile));
-            parent.addView(powermenuTile);
+        }
+        mModel.addPowerMenuTile(powermenuTile,
+                new QuickSettingsModel.BasicRefreshCallback(powermenuTile));
+        parent.addView(powermenuTile);
+
+        // Torch
+        if (mModel.hasTorchPackage()) {
+            final QuickSettingsBasicTile torchTile = new QuickSettingsBasicTile(mContext);
+            torchTile.setImageResource(R.drawable.ic_qs_torch_on);
+            torchTile.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    Intent intent = new Intent(TorchConstants.ACTION_TOGGLE_STATE);
+                    mContext.sendBroadcast(intent);
+                }
+            });
+            if (LONG_PRESS_TOGGLES) {
+                torchTile.setOnLongClickListener(new View.OnLongClickListener() {
+                    @Override
+                    public boolean onLongClick(View v) {
+                        getService().animateCollapsePanels();
+                        startSettingsActivity(TorchConstants.INTENT_LAUNCH_APP);
+                        return true;
+                    }
+                });
+                mModel.addTorchTile(torchTile,
+                        new QuickSettingsModel.BasicRefreshCallback(torchTile));
+                parent.addView(torchTile);
+            }
         }
     }
 
