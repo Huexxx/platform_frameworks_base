@@ -1288,4 +1288,7 @@
         <item>333</item>
         <item>353</item>
     </string-array>
+
+    <!-- Enable flashlight -->
+    <bool name="config_enableTorch">true</bool>
 </resources>
