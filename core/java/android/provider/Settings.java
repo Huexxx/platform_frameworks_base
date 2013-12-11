@@ -2429,12 +2429,6 @@ public final class Settings {
        public static final String STATUS_BAR_BRIGHTNESS_CONTROL = "status_bar_brightness_control";
 
         /**
-         * Whether to show/hide status bar native battery percentage
-         * @hide
-         */
-        public static final String STATUS_BAR_NATIVE_BATTERY_PERCENTAGE = "status_bar_native_battery_percentage";
-
-        /**
          * Quick Settings Quick Pulldown
          *
          * @hide

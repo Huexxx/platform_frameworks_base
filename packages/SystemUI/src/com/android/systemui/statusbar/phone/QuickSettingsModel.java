@@ -41,6 +41,7 @@ import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.view.inputmethod.InputMethodSubtype;
 
+import com.android.systemui.BatteryMeterView;
 import com.android.systemui.R;
 import com.android.systemui.settings.BrightnessController.BrightnessStateChangeCallback;
 import com.android.systemui.settings.CurrentUserTracker;
@@ -612,6 +613,9 @@ class QuickSettingsModel implements BluetoothStateChangeCallback,
     // BatteryController callback
     @Override
     public void onBatteryLevelChanged(int level, boolean pluggedIn, int status) {
+        // Don't show battery percentaje
+        BatteryMeterView tilePercent = (BatteryMeterView) mBatteryTile.findViewById(R.id.image);
+        tilePercent.setShowPercentage(false);
         mBatteryState.batteryLevel = level;
         mBatteryState.pluggedIn = pluggedIn;
         mBatteryCallback.refreshView(mBatteryTile, mBatteryState);
